@@ -2,7 +2,19 @@
 name = "svg2tex-rs"
 version = "0.1.0"
 edition = "2021"
+authors = ["Eito Yoneyama"]
+description = "Convert SVG artwork into PDF literal operators or TeX-friendly output for LaTeX workflows."
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/rice8y/svg2tex-rs"
+homepage = "https://github.com/rice8y/svg2tex-rs"
+documentation = "https://docs.rs/svg2tex-rs"
+keywords = ["svg", "latex", "tex", "pdf", "cli"]
+categories = ["command-line-utilities"]
+exclude = [
+    ".github/**",
+    "docs/**",
+]
 default-run = "svg2tex"
 
 [[bin]]
