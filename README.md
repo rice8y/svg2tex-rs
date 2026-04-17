@@ -6,10 +6,10 @@ possible, while still accepting a broad range of real-world SVG files through hy
 
 ## Installation
 
-Install directly from GitHub:
+Install from crates.io:
 
 ```bash
-cargo install --git https://github.com/rice8y/svg2tex-rs.git
+cargo install svg2tex-rs
 ```
 
 Clone and build locally without installing:
