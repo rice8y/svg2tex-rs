@@ -1,0 +1,281 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{fontspec}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyvrb}
+
+\geometry{margin=25mm}
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  urlcolor=blue!50!black
+}
+\setlist[itemize]{itemsep=0.3em, topsep=0.4em}
+\setlist[enumerate]{itemsep=0.3em, topsep=0.4em}
+
+\DefineVerbatimEnvironment{codeblock}{Verbatim}{
+  fontsize=\small,
+  frame=single,
+  rulecolor=\color{black!20}
+}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\codeheading}[1]{\textnormal{\texttt{#1}}}
+
+\title{svg2tex-rs Documentation}
+\author{Eito Yoneyama}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+\texttt{svg2tex-rs} provides the \texttt{svg2tex} command, which converts SVG files into either raw PDF literal operators or complete TeX source.
+Its goal is to make SVG a practical input format for TeX workflows without giving up vector output
+for common artwork.
+
+The converter prefers native PDF constructs whenever possible. When an SVG subtree is better
+represented by a raster intermediate image, the tool uses hybrid rendering instead of silently
+dropping the feature. This keeps conversion behavior explicit and visually safer for real-world
+documents.
+
+\section{Release Scope}
+
+Version 0.1.0 is suitable for public release as long as its scope is described honestly:
+
+\begin{itemize}
+\item It is strong on vector-preserving SVG to TeX conversion.
+\item It supports a broad range of SVG features, including gradients, patterns, masks, clip paths,
+filters, and embedded images.
+\item It includes reproducibility controls for text and font resolution.
+\item It may still use hybrid raster rendering for SVG subtrees that naturally require raster-domain
+processing.
+\end{itemize}
+
+This means the right release message is not ``all SVG is always pure vector PDF'', but rather
+``broad SVG support for TeX, with native vector output where practical and safe fallback where
+necessary''.
+
+\section{Installation}
+
+\subsection{Install from GitHub with Cargo}
+
+\begin{codeblock}
+cargo install --git https://github.com/rice8y/svg2tex-rs.git
+\end{codeblock}
+
+\subsection{Clone and Build Locally Without Installing}
+
+\begin{codeblock}
+git clone https://github.com/rice8y/svg2tex-rs.git
+cd svg2tex-rs
+just build
+\end{codeblock}
+
+The resulting binary is written to \texttt{target/release/svg2tex}.
+
+\subsection{Clone and Install with just}
+
+\begin{codeblock}
+git clone https://github.com/rice8y/svg2tex-rs.git
+cd svg2tex-rs
+just install
+\end{codeblock}
+
+By default this installs the binary into \texttt{\$HOME/.local/bin}. To change the target:
+
+\begin{codeblock}
+LOCAL_BIN_DIR=/your/bin/path just install
+\end{codeblock}
+
+\section{Basic Usage}
+
+\subsection{Emit Raw PDF Literal}
+
+\begin{codeblock}
+svg2tex --input drawing.svg --output drawing.literal
+\end{codeblock}
+
+This mode emits only the literal PDF operator stream.
+
+\subsection{Emit a Standalone TeX Document}
+
+\begin{codeblock}
+svg2tex --input drawing.svg --tex --output drawing.tex
+lualatex drawing.tex
+\end{codeblock}
+
+This is the recommended default when you want a directly compilable file.
+
+\subsection{Emit a TeX Snippet}
+
+\begin{codeblock}
+svg2tex --input drawing.svg --tex --tex-format snippet --output drawing-snippet.tex
+\end{codeblock}
+
+This mode emits TeX definitions without a document wrapper, which is useful for inclusion into
+another TeX source tree.
+
+\section{CLI Reference}
+
+\begin{longtable}{L{0.34\linewidth}L{0.60\linewidth}}
+\toprule
+\textbf{Option} & \textbf{Meaning} \\
+\midrule
+\endfirsthead
+\multicolumn{2}{r}{\textit{CLI Reference continued from previous page}} \\
+\toprule
+\textbf{Option} & \textbf{Meaning} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{2}{r}{\textit{Continued on next page}} \\
+\endfoot
+\bottomrule
+\endlastfoot
+\texttt{-i, --input <INPUT>} & Input SVG file path. \\
+\texttt{-o, --output <OUTPUT>} & Output path. If omitted, output is written to standard output. \\
+\texttt{--tex} & Emit TeX output instead of only PDF literal content. \\
+\texttt{--tex-format <FORMAT>} & TeX wrapper format: \texttt{standalone}, \texttt{article}, or \texttt{snippet}. \\
+\texttt{--embed-images} & Embed raster images referenced by the SVG. \\
+\texttt{--no-system-fonts} & Disable host system font loading. \\
+\texttt{--strict-fonts} & Error out if text conversion still depends on host-side font discovery. \\
+\texttt{--report-fonts} & Print the font requirements observed in SVG text nodes. \\
+\texttt{--font-family <NAME>} & Set the default font family used when the SVG omits one. \\
+\texttt{--font-size <SIZE>} & Set the default font size used when the SVG omits one. \\
+\texttt{--serif-family <NAME>} & Override the generic serif family. \\
+\texttt{--sans-serif-family <NAME>} & Override the generic sans-serif family. \\
+\texttt{--cursive-family <NAME>} & Override the generic cursive family. \\
+\texttt{--fantasy-family <NAME>} & Override the generic fantasy family. \\
+\texttt{--monospace-family <NAME>} & Override the generic monospace family. \\
+\texttt{--font-file <PATH>} & Load an additional font file before parsing. May be repeated. \\
+\texttt{--font-dir <PATH>} & Load all fonts from a directory before parsing. May be repeated. \\
+\texttt{--strict} & Fail instead of hybrid-rendering unsupported SVG subtrees. \\
+\texttt{--fallback-dpi <N>} & Set the raster fallback resolution. \\
+\texttt{--engine <ENGINE>} & Choose \texttt{auto}, \texttt{pdftex}, \texttt{luatex}, \texttt{xetex}, \texttt{ptex}, or \texttt{uptex}. \\
+\end{longtable}
+
+\section{TeX Output Modes}
+
+\subsection{\codeheading{standalone}}
+
+This is the default mode when \texttt{--tex} is enabled. It emits a complete cropped document.
+For direct compilation and quick inspection, this is the best default.
+
+\subsection{\codeheading{article}}
+
+This emits a complete article-class document. Use it when you want a less specialized wrapper
+or when integrating into workflows that already assume the standard article layout.
+
+\subsection{\codeheading{snippet}}
+
+This mode emits only the TeX definitions needed to place the converted drawing. It is intended for
+projects that already own the surrounding document structure.
+
+\section{Rendering Strategy}
+
+\subsection{Vector First}
+
+The converter tries to preserve SVG semantics using native PDF constructs such as:
+
+\begin{itemize}
+\item path operators
+\item clipping paths
+\item shadings for gradients
+\item patterns
+\item form XObjects
+\item soft masks
+\item graphics states
+\end{itemize}
+
+\subsection{Hybrid Rendering}
+
+Some SVG features are naturally raster-domain operations, especially certain filter pipelines.
+In those situations, \texttt{svg2tex} rasterizes only the necessary subtree whenever possible.
+This avoids both silent feature loss and unnecessary full-document rasterization.
+
+\subsection{Strict Mode}
+
+Use \texttt{--strict} when you want conversion to fail instead of using hybrid rendering:
+
+\begin{codeblock}
+svg2tex --input drawing.svg --tex --strict --output drawing.tex
+\end{codeblock}
+
+\section{Text and Font Reproducibility}
+
+SVG text is flattened into paths during conversion. That makes the final TeX/PDF output self-contained
+with respect to glyph outlines, but the outlines themselves still depend on which fonts were available
+to the converter at parse time.
+
+For reproducible builds:
+
+\begin{enumerate}
+\item Disable system font discovery with \texttt{--no-system-fonts}.
+\item Load the required fonts explicitly with \texttt{--font-file} or \texttt{--font-dir}.
+\item Use \texttt{--strict-fonts} to fail if a requested named font is missing.
+\item Use \texttt{--report-fonts} while diagnosing text-heavy artwork.
+\end{enumerate}
+
+Recommended reproducible command:
+
+\begin{codeblock}
+svg2tex \
+  --input poster.svg \
+  --tex \
+  --no-system-fonts \
+  --strict-fonts \
+  --font-file ./fonts/SourceSans3-Regular.ttf \
+  --font-family "Source Sans 3" \
+  --output poster.tex
+\end{codeblock}
+
+\section{Examples}
+
+\subsection{Compile with LuaLaTeX}
+
+\begin{codeblock}
+svg2tex --input figure.svg --tex --engine luatex --output figure.tex
+lualatex figure.tex
+\end{codeblock}
+
+\subsection{Compile with pdfTeX}
+
+\begin{codeblock}
+svg2tex --input figure.svg --tex --engine pdftex --output figure.tex
+pdflatex figure.tex
+\end{codeblock}
+
+\subsection{DVI Workflow}
+
+\begin{codeblock}
+svg2tex --input figure.svg --tex --engine uptex --output figure.tex
+uplatex figure.tex
+dvipdfmx figure.dvi
+\end{codeblock}
+
+\section{Operational Notes}
+
+\begin{itemize}
+\item If exact reproduction of text is important, treat font configuration as part of the build input.
+\item If exact vector-only output is important, use \texttt{--strict} and review failures explicitly.
+\item If a document contains complex filters, hybrid rendering may be the correct and expected result.
+\item For direct user-facing output, \texttt{--tex --tex-format standalone} is the most convenient mode.
+\end{itemize}
+
+\section{Conclusion}
+
+\texttt{svg2tex-rs} v0.1.0 is a solid first public release for TeX users who want SVG support with a
+serious bias toward native vector output. Its strengths are breadth of accepted SVG input, explicit
+handling of difficult features, and practical controls for reproducible text conversion.
+
+\end{document}
