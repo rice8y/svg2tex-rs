@@ -1,3 +1,8 @@
+//! Raster fallback helpers.
+//!
+//! These routines snapshot unsupported subtrees through `resvg` and place the
+//! resulting bitmap back into the PDF operator stream.
+
 use resvg::tiny_skia::{Pixmap, Transform};
 use usvg::{Node, NonZeroRect, Tree};
 
@@ -9,12 +14,20 @@ impl PdfConverter {
         let width = (self.size.width() * scale).ceil().max(1.0) as u32;
         let height = (self.size.height() * scale).ceil().max(1.0) as u32;
 
-        let mut pixmap = Pixmap::new(width, height)
-            .ok_or_else(|| format!("Failed to allocate raster fallback surface: {}x{}", width, height))?;
+        let mut pixmap = Pixmap::new(width, height).ok_or_else(|| {
+            format!(
+                "Failed to allocate raster fallback surface: {}x{}",
+                width, height
+            )
+        })?;
 
         let scale_x = width as f32 / self.size.width();
         let scale_y = height as f32 / self.size.height();
-        resvg::render(tree, Transform::from_scale(scale_x, scale_y), &mut pixmap.as_mut());
+        resvg::render(
+            tree,
+            Transform::from_scale(scale_x, scale_y),
+            &mut pixmap.as_mut(),
+        );
 
         let png = pixmap
             .encode_png()
@@ -52,9 +65,9 @@ impl PdfConverter {
         parent_transform: &usvg::Transform,
         reasons: &[String],
     ) -> Result<(), String> {
-        let bbox = node
-            .abs_layer_bounding_box()
-            .ok_or_else(|| "Failed to rasterize unsupported subtree: node has zero size".to_string())?;
+        let bbox = node.abs_layer_bounding_box().ok_or_else(|| {
+            "Failed to rasterize unsupported subtree: node has zero size".to_string()
+        })?;
 
         let (png, width, height) = self.render_node_png(node, bbox)?;
         let resource = self
@@ -66,6 +79,9 @@ impl PdfConverter {
         self.pdf_ops.push_str("q ");
 
         if !super::util::is_identity_transform(parent_transform) {
+            // The rasterized image is already positioned in absolute page
+            // space, so we neutralize the inherited transform before placing
+            // the bitmap back into the current content stream.
             let neutralize = parent_transform
                 .invert()
                 .unwrap_or(usvg::Transform::identity());
@@ -101,11 +117,7 @@ impl PdfConverter {
     ) -> Result<(), String> {
         let bbox = match node {
             Node::Group(group) => group.abs_layer_bounding_box(),
-            _ => {
-                return Err(
-                    "Filtered raster fallback currently expects a group node".to_string()
-                )
-            }
+            _ => return Err("Filtered raster fallback currently expects a group node".to_string()),
         };
         let (png, width, height) = self.render_group_png(node, bbox)?;
         let resource = self
@@ -117,6 +129,8 @@ impl PdfConverter {
         self.pdf_ops.push_str("q ");
 
         if !super::util::is_identity_transform(relative_transform) {
+            // Filter snapshots are rendered after the group's transform has
+            // already been applied by the surrounding state stack.
             let neutralize = relative_transform
                 .invert()
                 .unwrap_or(usvg::Transform::identity());
@@ -162,8 +176,12 @@ impl PdfConverter {
 
         let scale_x = width as f32 / bbox.width();
         let scale_y = height as f32 / bbox.height();
-        resvg::render_node(node, Transform::from_scale(scale_x, scale_y), &mut pixmap.as_mut())
-            .ok_or_else(|| "Failed to render unsupported subtree".to_string())?;
+        resvg::render_node(
+            node,
+            Transform::from_scale(scale_x, scale_y),
+            &mut pixmap.as_mut(),
+        )
+        .ok_or_else(|| "Failed to render unsupported subtree".to_string())?;
 
         let png = pixmap
             .encode_png()
@@ -190,8 +208,12 @@ impl PdfConverter {
 
         let scale_x = width as f32 / bbox.width();
         let scale_y = height as f32 / bbox.height();
-        resvg::render_node(node, Transform::from_scale(scale_x, scale_y), &mut pixmap.as_mut())
-            .ok_or_else(|| "Failed to render filtered group".to_string())?;
+        resvg::render_node(
+            node,
+            Transform::from_scale(scale_x, scale_y),
+            &mut pixmap.as_mut(),
+        )
+        .ok_or_else(|| "Failed to render filtered group".to_string())?;
 
         let png = pixmap
             .encode_png()
