@@ -91,15 +91,15 @@ impl PdfConverter {
                     output.push_str("\\ifsvgpdfmode\n");
                     output.push_str("  \\ifpdftex\n");
                     if !pdf_page_resources.is_empty() {
-                        output.push_str("    \\pdfpageresources{\n");
+                        output.push_str("    \\pdfpageresources\\expanded{{\n");
                         output.push_str(&pdf_page_resources);
-                        output.push_str("    }\n");
+                        output.push_str("    }}\n");
                     }
                     output.push_str("  \\else\\ifluatex\n");
                     if !pdf_page_resources.is_empty() {
-                        output.push_str("    \\pdfvariable pageresources{\n");
+                        output.push_str("    \\pdfvariable pageresources\\expanded{{\n");
                         output.push_str(&pdf_page_resources);
-                        output.push_str("    }\n");
+                        output.push_str("    }}\n");
                     }
                     output.push_str("  \\else\n");
                     output.push_str(&dvi_page_resources);
@@ -110,16 +110,16 @@ impl PdfConverter {
                 }
                 TexEngine::PdfTeX => {
                     if !pdf_page_resources.is_empty() {
-                        output.push_str("\\pdfpageresources{\n");
+                        output.push_str("\\pdfpageresources\\expanded{{\n");
                         output.push_str(&pdf_page_resources);
-                        output.push_str("}\n");
+                        output.push_str("}}\n");
                     }
                 }
                 TexEngine::LuaTeX => {
                     if !pdf_page_resources.is_empty() {
-                        output.push_str("\\pdfvariable pageresources{\n");
+                        output.push_str("\\pdfvariable pageresources\\expanded{{\n");
                         output.push_str(&pdf_page_resources);
-                        output.push_str("}\n");
+                        output.push_str("}}\n");
                     }
                 }
                 TexEngine::XeTeX | TexEngine::PTeX | TexEngine::UpTeX => {
