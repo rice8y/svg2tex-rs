@@ -1,6 +1,6 @@
 [package]
 name = "svg2tex-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Eito Yoneyama"]
 description = "Convert SVG artwork into PDF literal operators or TeX-friendly output for LaTeX workflows."
