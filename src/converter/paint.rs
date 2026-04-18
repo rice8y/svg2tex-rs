@@ -1,3 +1,8 @@
+//! Path painting, gradients, masks, and pattern emission.
+//!
+//! These helpers translate `usvg` paint servers into PDF painting operators and
+//! the auxiliary resources needed to reproduce SVG semantics.
+
 use tiny_skia::{Path as TinyPath, Stroke as TinyStroke, StrokeDash};
 use usvg::tiny_skia_path;
 use usvg::{PaintOrder, SpreadMethod, Stop};
@@ -45,9 +50,11 @@ impl PdfConverter {
                 let g = color.green as f32 / 255.0;
                 let b = color.blue as f32 / 255.0;
                 if is_fill {
-                    self.pdf_ops.push_str(&format!("{:.6} {:.6} {:.6} rg ", r, g, b));
+                    self.pdf_ops
+                        .push_str(&format!("{:.6} {:.6} {:.6} rg ", r, g, b));
                 } else {
-                    self.pdf_ops.push_str(&format!("{:.6} {:.6} {:.6} RG ", r, g, b));
+                    self.pdf_ops
+                        .push_str(&format!("{:.6} {:.6} {:.6} RG ", r, g, b));
                 }
             }
             usvg::Paint::LinearGradient(_)
@@ -68,6 +75,8 @@ impl PdfConverter {
     }
 
     pub(crate) fn render_path_components(&mut self, path: &usvg::Path) -> Result<(), String> {
+        // SVG paint order applies fill and stroke as separate paint operations,
+        // so we preserve the declared order instead of collapsing them.
         match path.paint_order() {
             PaintOrder::FillAndStroke => {
                 if let Some(fill) = path.fill() {
@@ -106,12 +115,18 @@ impl PdfConverter {
                 }
                 Ok(())
             }
-            usvg::Paint::LinearGradient(gradient) => {
-                self.render_linear_gradient_fill(path.data(), Some(fill.rule()), gradient, fill_opacity)
-            }
-            usvg::Paint::RadialGradient(gradient) => {
-                self.render_radial_gradient_fill(path.data(), Some(fill.rule()), gradient, fill_opacity)
-            }
+            usvg::Paint::LinearGradient(gradient) => self.render_linear_gradient_fill(
+                path.data(),
+                Some(fill.rule()),
+                gradient,
+                fill_opacity,
+            ),
+            usvg::Paint::RadialGradient(gradient) => self.render_radial_gradient_fill(
+                path.data(),
+                Some(fill.rule()),
+                gradient,
+                fill_opacity,
+            ),
             usvg::Paint::Pattern(pattern) => {
                 let pattern_name = self.ensure_tiling_pattern(pattern)?;
                 self.pdf_ops.push_str("/Pattern cs ");
@@ -178,7 +193,11 @@ impl PdfConverter {
             pattern.rect().y(),
             pattern.rect().width(),
             pattern.rect().height(),
-            Self::pdf_matrix(pattern.transform().pre_translate(pattern.rect().x(), pattern.rect().y()))
+            Self::pdf_matrix(
+                pattern
+                    .transform()
+                    .pre_translate(pattern.rect().x(), pattern.rect().y())
+            )
         );
         if let Some(resource) = self.resources.patterns.get(&key) {
             return Ok(resource.name.clone());
@@ -186,9 +205,9 @@ impl PdfConverter {
 
         let stream = self.render_pattern_stream(pattern.root())?;
         let rect = pattern.rect();
-        let matrix = pattern
-            .transform()
-            .pre_translate(rect.x(), rect.y());
+        // PDF pattern matrices are anchored at the pattern cell origin, while
+        // SVG stores the transform separately from the cell rect.
+        let matrix = pattern.transform().pre_translate(rect.x(), rect.y());
         let pdf_resources = self.inline_pdf_resource_dict(true);
         let dvi_resources = self.inline_dvi_resource_dict(true);
         let pdf_dict = format!(
@@ -213,10 +232,7 @@ impl PdfConverter {
         Ok(self.ensure_pattern(key, pdf_dict, dvi_dict, stream))
     }
 
-    pub(crate) fn ensure_mask_ext_gstate(
-        &mut self,
-        mask: &usvg::Mask,
-    ) -> Result<String, String> {
+    pub(crate) fn ensure_mask_ext_gstate(&mut self, mask: &usvg::Mask) -> Result<String, String> {
         let form_name = self.ensure_mask_form(mask)?;
         let subtype = match mask.kind() {
             usvg::MaskType::Alpha => "Alpha",
@@ -322,7 +338,8 @@ impl PdfConverter {
         }
 
         let shading_name = self.ensure_linear_shading(gradient);
-        let (soft_mask_gs, effective_opacity) = self.gradient_soft_mask_state_for_linear(gradient, paint_opacity);
+        let (soft_mask_gs, effective_opacity) =
+            self.gradient_soft_mask_state_for_linear(gradient, paint_opacity);
         self.paint_shading_clip(
             clip_path,
             fill_rule,
@@ -350,7 +367,8 @@ impl PdfConverter {
         }
 
         let shading_name = self.ensure_radial_shading(gradient);
-        let (soft_mask_gs, effective_opacity) = self.gradient_soft_mask_state_for_radial(gradient, paint_opacity);
+        let (soft_mask_gs, effective_opacity) =
+            self.gradient_soft_mask_state_for_radial(gradient, paint_opacity);
         self.paint_shading_clip(
             clip_path,
             fill_rule,
@@ -428,6 +446,8 @@ impl PdfConverter {
         }
 
         self.pdf_ops.push_str("q ");
+        // Gradient opacity is represented either as a uniform fill alpha or as
+        // a soft mask, but the geometric clip path is shared between both.
         if let Some(gs_name) = soft_mask_gs_name {
             self.pdf_ops.push_str(&format!("/{} gs ", gs_name));
         }
@@ -549,7 +569,11 @@ impl PdfConverter {
         let x1 = gradient.x1() + dx * t1;
         let y1 = gradient.y1() + dy * t1;
         let stops_key = Self::gradient_stops_key_direction(gradient.stops(), reversed);
-        let key_prefix = if alpha_only { "alpha-axial-segment" } else { "axial-segment" };
+        let key_prefix = if alpha_only {
+            "alpha-axial-segment"
+        } else {
+            "axial-segment"
+        };
         let key = format!(
             "{}/{}/{:.6}/{:.6}/{:.6}/{:.6}/{}",
             key_prefix,
@@ -565,7 +589,11 @@ impl PdfConverter {
         } else {
             Self::pdf_function_from_stops_direction(gradient.stops(), reversed)
         };
-        let color_space = if alpha_only { "DeviceGray" } else { "DeviceRGB" };
+        let color_space = if alpha_only {
+            "DeviceGray"
+        } else {
+            "DeviceRGB"
+        };
         let dict = format!(
             "<</ShadingType 2 /ColorSpace /{} /Coords [{:.6} {:.6} {:.6} {:.6}] /Function {} /Extend [false false] /Matrix [{}] /AntiAlias true>>",
             color_space,
@@ -597,7 +625,11 @@ impl PdfConverter {
         let r0 = gradient.r().get() * t0;
         let r1 = gradient.r().get() * t1;
         let stops_key = Self::gradient_stops_key_direction(gradient.stops(), reversed);
-        let key_prefix = if alpha_only { "alpha-radial-segment" } else { "radial-segment" };
+        let key_prefix = if alpha_only {
+            "alpha-radial-segment"
+        } else {
+            "radial-segment"
+        };
         let key = format!(
             "{}/{}/{:.6}/{:.6}/{:.6}/{:.6}/{:.6}/{:.6}/{}",
             key_prefix,
@@ -615,7 +647,11 @@ impl PdfConverter {
         } else {
             Self::pdf_function_from_stops_direction(gradient.stops(), reversed)
         };
-        let color_space = if alpha_only { "DeviceGray" } else { "DeviceRGB" };
+        let color_space = if alpha_only {
+            "DeviceGray"
+        } else {
+            "DeviceRGB"
+        };
         let dict = format!(
             "<</ShadingType 3 /ColorSpace /{} /Coords [{:.6} {:.6} {:.6} {:.6} {:.6} {:.6}] /Function {} /Extend [false false] /Matrix [{}] /AntiAlias true>>",
             color_space,
@@ -682,14 +718,8 @@ impl PdfConverter {
             converter
                 .pdf_ops
                 .push_str(&format!("q 1 0 0 -1 0 {:.6} cm ", converter.size.height()));
-            converter.paint_linear_spread_segments(
-                clip_path,
-                fill_rule,
-                gradient,
-                1.0,
-                None,
-                true,
-            )?;
+            converter
+                .paint_linear_spread_segments(clip_path, fill_rule, gradient, 1.0, None, true)?;
             converter.pdf_ops.push_str("Q");
             Ok(())
         })?;
@@ -715,14 +745,8 @@ impl PdfConverter {
             converter
                 .pdf_ops
                 .push_str(&format!("q 1 0 0 -1 0 {:.6} cm ", converter.size.height()));
-            converter.paint_radial_spread_segments(
-                clip_path,
-                fill_rule,
-                gradient,
-                1.0,
-                None,
-                true,
-            )?;
+            converter
+                .paint_radial_spread_segments(clip_path, fill_rule, gradient, 1.0, None, true)?;
             converter.pdf_ops.push_str("Q");
             Ok(())
         })?;
@@ -995,12 +1019,7 @@ impl PdfConverter {
         }
     }
 
-    fn append_radial_segment_clip(
-        &mut self,
-        gradient: &usvg::RadialGradient,
-        t0: f32,
-        t1: f32,
-    ) {
+    fn append_radial_segment_clip(&mut self, gradient: &usvg::RadialGradient, t0: f32, t1: f32) {
         let dcx = gradient.cx() - gradient.fx();
         let dcy = gradient.cy() - gradient.fy();
         let outer_center = (gradient.fx() + dcx * t1, gradient.fy() + dcy * t1);
@@ -1008,9 +1027,19 @@ impl PdfConverter {
         let outer_radius = gradient.r().get() * t1;
         let inner_radius = gradient.r().get() * t0;
 
-        self.append_transformed_circle_path(outer_center.0, outer_center.1, outer_radius, gradient.transform());
+        self.append_transformed_circle_path(
+            outer_center.0,
+            outer_center.1,
+            outer_radius,
+            gradient.transform(),
+        );
         if t0 > 0.0 {
-            self.append_transformed_circle_path(inner_center.0, inner_center.1, inner_radius, gradient.transform());
+            self.append_transformed_circle_path(
+                inner_center.0,
+                inner_center.1,
+                inner_radius,
+                gradient.transform(),
+            );
         }
     }
 
@@ -1295,7 +1324,10 @@ impl PdfConverter {
 
         if out.last().map(|stop| stop.offset).unwrap_or(1.0) < 1.0 {
             let last = *out.last().unwrap();
-            out.push(GradientStopData { offset: 1.0, ..last });
+            out.push(GradientStopData {
+                offset: 1.0,
+                ..last
+            });
         }
 
         let epsilon = 0.0001;
@@ -1508,7 +1540,10 @@ impl PdfConverter {
         }
     }
 
-    pub(crate) fn gradient_is_natively_supported(_stops: &[Stop], spread_method: SpreadMethod) -> bool {
+    pub(crate) fn gradient_is_natively_supported(
+        _stops: &[Stop],
+        spread_method: SpreadMethod,
+    ) -> bool {
         matches!(
             spread_method,
             SpreadMethod::Pad | SpreadMethod::Reflect | SpreadMethod::Repeat
