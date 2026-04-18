@@ -1,3 +1,8 @@
+//! Resource interning and deterministic emission helpers.
+//!
+//! The converter builds resources opportunistically during traversal, then the
+//! TeX/PDF emitters read these tables in name order to produce stable output.
+
 use super::{
     ExtGStateResource, FormResource, FunctionResource, ImageResource, PatternResource, PdfContext,
     PdfConverter, PdfResources, ShadingResource,
@@ -105,6 +110,7 @@ impl PdfConverter {
             .iter()
             .map(|(key, value)| (key.as_str(), value))
             .collect::<Vec<_>>();
+        // Stable ordering keeps generated TeX and tests deterministic.
         items.sort_by(|a, b| a.1.name.cmp(&b.1.name));
         items
     }
@@ -137,9 +143,13 @@ impl PdfConverter {
         }
 
         let name = format!("Sh{}", self.resources.get_next_id());
-        self.resources
-            .shadings
-            .insert(key, ShadingResource { name: name.clone(), dict });
+        self.resources.shadings.insert(
+            key,
+            ShadingResource {
+                name: name.clone(),
+                dict,
+            },
+        );
         name
     }
 
@@ -230,7 +240,9 @@ impl PdfConverter {
         let ext_gstates = self
             .sorted_ext_gstates()
             .into_iter()
-            .map(|(_, resource)| format!("/{} {}", resource.name, Self::tex_obj_ref(&resource.name)))
+            .map(|(_, resource)| {
+                format!("/{} {}", resource.name, Self::tex_obj_ref(&resource.name))
+            })
             .collect::<Vec<_>>();
         if !ext_gstates.is_empty() {
             sections.push(format!("/ExtGState<<{}>>", ext_gstates.join(" ")));
@@ -249,7 +261,9 @@ impl PdfConverter {
             let patterns = self
                 .sorted_patterns()
                 .into_iter()
-                .map(|(_, pattern)| format!("/{} {}", pattern.name, Self::tex_obj_ref(&pattern.name)))
+                .map(|(_, pattern)| {
+                    format!("/{} {}", pattern.name, Self::tex_obj_ref(&pattern.name))
+                })
                 .collect::<Vec<_>>();
             if !patterns.is_empty() {
                 sections.push(format!("/Pattern<<{}>>", patterns.join(" ")));
@@ -273,6 +287,9 @@ impl PdfConverter {
         if sections.is_empty() {
             String::new()
         } else {
+            // The TeX backends inject this dictionary into page resources or
+            // form XObjects, so it must stay compact and already reference the
+            // synthetic object names assigned by `PdfResources`.
             format!("<<{}>>", sections.join(" "))
         }
     }
@@ -332,6 +349,7 @@ impl PdfConverter {
 }
 
 impl PdfResources {
+    /// Creates empty resource tables for a single document conversion.
     pub(crate) fn new() -> Self {
         Self {
             ext_gstates: std::collections::HashMap::new(),
@@ -344,6 +362,7 @@ impl PdfResources {
         }
     }
 
+    /// Returns a monotonically increasing numeric suffix for synthetic names.
     pub(crate) fn get_next_id(&mut self) -> usize {
         let id = self.next_id;
         self.next_id += 1;
@@ -352,6 +371,7 @@ impl PdfResources {
 }
 
 impl PdfContext {
+    /// Creates an empty path-conversion state.
     pub(crate) fn new() -> Self {
         Self {
             current_point: None,

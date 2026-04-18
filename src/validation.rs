@@ -12,6 +12,7 @@ pub(crate) struct TreeAnalysis {
     pub(crate) text_font_requirements: Vec<TextFontRequirement>,
 }
 
+/// Describes one distinct font request observed while traversing SVG text.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextFontRequirement {
     pub families: Vec<String>,
@@ -21,6 +22,7 @@ pub struct TextFontRequirement {
 }
 
 impl TextFontRequirement {
+    /// Formats a stable, human-readable description for diagnostics.
     pub fn summary(&self) -> String {
         format!(
             "families=[{}], style={}, stretch={}, weight={}",
@@ -39,6 +41,8 @@ impl TextFontRequirement {
 }
 
 impl TreeAnalysis {
+    /// Returns named font families that were requested by the SVG text but are
+    /// not present in the currently loaded font database.
     pub(crate) fn missing_named_font_families(
         &self,
         fontdb: &std::sync::Arc<fontdb::Database>,
@@ -60,6 +64,7 @@ impl TreeAnalysis {
     }
 }
 
+/// Collects conversion-relevant metadata from the parsed SVG tree.
 pub(crate) fn analyze_tree(tree: &Tree, embed_images: bool) -> TreeAnalysis {
     let mut analysis = TreeAnalysis::default();
 
@@ -70,10 +75,12 @@ pub(crate) fn analyze_tree(tree: &Tree, embed_images: bool) -> TreeAnalysis {
     analysis
 }
 
+/// Checks whether the converter must fall back to rasterization for this node.
 pub(crate) fn node_requires_raster(node: &Node, embed_images: bool) -> bool {
     !node_unsupported_features(node, embed_images).is_empty()
 }
 
+/// Lists the unsupported features that force raster fallback for this node.
 pub(crate) fn node_unsupported_features(node: &Node, embed_images: bool) -> Vec<String> {
     let mut features = Vec::new();
     collect_direct_features(node, embed_images, &mut features);
@@ -98,6 +105,8 @@ fn analyze_subtree(node: &Node, embed_images: bool, analysis: &mut TreeAnalysis)
         Node::Text(text) => {
             analysis.has_text_nodes = true;
             collect_text_font_requirements(text, analysis);
+            // usvg exposes flattened text as a synthetic group of paths, so we
+            // keep traversing to detect unsupported features inside text runs.
             for child in text.flattened().children() {
                 analyze_subtree(child, embed_images, analysis);
             }
@@ -109,7 +118,12 @@ fn collect_text_font_requirements(text: &usvg::Text, analysis: &mut TreeAnalysis
     for chunk in text.chunks() {
         for span in chunk.spans() {
             let requirement = TextFontRequirement {
-                families: span.font().families().iter().map(font_family_name).collect(),
+                families: span
+                    .font()
+                    .families()
+                    .iter()
+                    .map(font_family_name)
+                    .collect(),
                 style: format!("{:?}", span.font().style()).to_lowercase(),
                 stretch: format!("{:?}", span.font().stretch()).to_lowercase(),
                 weight: span.font().weight(),
@@ -143,8 +157,7 @@ fn collect_direct_features(node: &Node, embed_images: bool, features: &mut Vec<S
             }
         }
         Node::Group(group) => {
-            if !group.filters().is_empty()
-                && !PdfConverter::filters_are_supported(group.filters())
+            if !group.filters().is_empty() && !PdfConverter::filters_are_supported(group.filters())
             {
                 push_feature_name(features, "filters");
             }

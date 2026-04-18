@@ -1,3 +1,8 @@
+//! Library entry points for converting SVG input into PDF operators or TeX.
+//!
+//! The crate keeps CLI parsing separate from conversion so tests and other
+//! callers can run the same pipeline through [`render_output`].
+
 mod cli;
 mod converter;
 mod preprocess;
@@ -16,6 +21,9 @@ use std::io::Write;
 use usvg::{Options, Tree};
 use validation::{analyze_tree, TextFontRequirement};
 
+/// Renders an SVG input into either raw PDF operators or TeX source.
+///
+/// This is the main library entry point used by both the CLI and tests.
 pub fn render_output(args: &Args) -> Result<String, String> {
     if !args.fallback_dpi.is_finite() || args.fallback_dpi <= 0.0 {
         return Err(format!(
@@ -129,6 +137,8 @@ Use --no-system-fonts together with --font-file/--font-dir and explicit default 
         args.engine,
         args.tex_format,
     );
+    // Strict mode rejects unsupported features before conversion so the caller
+    // can decide whether a raster fallback is acceptable.
     if !analysis.unsupported_features.is_empty() && args.strict {
         return Err(format!(
             "Unsupported SVG features detected: {}. Re-run without --strict to rasterize only the unsupported subtrees.",
@@ -162,6 +172,7 @@ Use --no-system-fonts together with --font-file/--font-dir and explicit default 
     })
 }
 
+/// Runs the full conversion pipeline and writes the result to stdout or a file.
 pub fn run(args: Args) -> Result<(), String> {
     let output_content = render_output(&args)?;
 

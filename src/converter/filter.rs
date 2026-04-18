@@ -1,10 +1,15 @@
+//! Filter support for the converter.
+//!
+//! The implementation prefers native PDF constructs when a filter graph can be
+//! represented directly; otherwise the filtered subtree is rasterized.
+
 use std::collections::HashMap;
 
-use usvg::{BlendMode, Color, Group, Node, NonZeroRect};
 use usvg::filter::{
-    ColorMatrixKind, CompositeOperator, ComponentTransfer, Filter, Input, Kind, Primitive,
+    ColorMatrixKind, ComponentTransfer, CompositeOperator, Filter, Input, Kind, Primitive,
     TransferFunction,
 };
+use usvg::{BlendMode, Color, Group, Node, NonZeroRect};
 
 use super::{PdfContext, PdfConverter};
 
@@ -60,6 +65,8 @@ impl PdfConverter {
         group: &Group,
         relative_transform: &usvg::Transform,
     ) -> Result<(), String> {
+        // Unsupported filter primitives fall back to a rasterized snapshot of
+        // the group so the surrounding document can still stay vector-based.
         if !Self::filters_are_natively_supported(group.filters()) {
             let reasons = Self::filter_feature_names(group.filters());
             let node = group_node.ok_or_else(|| {
@@ -78,7 +85,8 @@ impl PdfConverter {
             current = self.apply_filter(filter, &current)?;
         }
 
-        self.pdf_ops.push_str(&format!("/{} Do ", current.form_name));
+        self.pdf_ops
+            .push_str(&format!("/{} Do ", current.form_name));
         Ok(())
     }
 
@@ -125,6 +133,8 @@ impl PdfConverter {
         let mut last = source_graphic.clone();
 
         for primitive in filter.primitives() {
+            // SVG filter inputs can reference earlier `result` names, so we
+            // retain each intermediate output while walking the primitive list.
             let value = self.apply_filter_primitive(primitive, source_graphic, &results)?;
             if !primitive.result().is_empty() {
                 results.insert(primitive.result().to_string(), value.clone());
@@ -143,11 +153,8 @@ impl PdfConverter {
     ) -> Result<FilterValue, String> {
         match primitive.kind() {
             Kind::Flood(flood) => {
-                let form_name = self.ensure_flood_form(
-                    primitive.rect(),
-                    flood.color(),
-                    flood.opacity().get(),
-                );
+                let form_name =
+                    self.ensure_flood_form(primitive.rect(), flood.color(), flood.opacity().get());
                 Ok(FilterValue {
                     form_name: form_name.clone(),
                     alpha_form_name: form_name,
@@ -189,16 +196,18 @@ impl PdfConverter {
                         bbox: primitive.rect(),
                     })
                 }
-                other => Err(format!("Unsupported native feColorMatrix variant: {other:?}")),
+                other => Err(format!(
+                    "Unsupported native feColorMatrix variant: {other:?}"
+                )),
             },
             Kind::ComponentTransfer(transfer) => {
-                let input =
-                    self.resolve_filter_input(transfer.input(), source_graphic, results)?;
+                let input = self.resolve_filter_input(transfer.input(), source_graphic, results)?;
                 self.ensure_component_transfer_filter_value(primitive.rect(), &input, transfer)
             }
             Kind::Blend(blend) => {
                 let source = self.resolve_filter_input(blend.input1(), source_graphic, results)?;
-                let backdrop = self.resolve_filter_input(blend.input2(), source_graphic, results)?;
+                let backdrop =
+                    self.resolve_filter_input(blend.input2(), source_graphic, results)?;
                 let form_name = self.ensure_blend_form(
                     primitive.rect(),
                     &backdrop.form_name,
@@ -229,7 +238,8 @@ impl PdfConverter {
             }
             Kind::Tile(tile) => {
                 let input = self.resolve_filter_input(tile.input(), source_graphic, results)?;
-                let form_name = self.ensure_tile_form(&input.form_name, input.bbox, primitive.rect());
+                let form_name =
+                    self.ensure_tile_form(&input.form_name, input.bbox, primitive.rect());
                 let alpha_form_name =
                     self.ensure_tile_form(&input.alpha_form_name, input.bbox, primitive.rect());
                 Ok(FilterValue {
@@ -239,7 +249,8 @@ impl PdfConverter {
                 })
             }
             Kind::Composite(composite) => {
-                let source = self.resolve_filter_input(composite.input1(), source_graphic, results)?;
+                let source =
+                    self.resolve_filter_input(composite.input1(), source_graphic, results)?;
                 let backdrop =
                     self.resolve_filter_input(composite.input2(), source_graphic, results)?;
                 self.ensure_composite_filter_value(
@@ -324,10 +335,9 @@ impl PdfConverter {
                     bbox: source_graphic.bbox,
                 })
             }
-            Input::Reference(name) => results
-                .get(name)
-                .cloned()
-                .ok_or_else(|| format!("Filter input '{name}' does not reference an earlier result")),
+            Input::Reference(name) => results.get(name).cloned().ok_or_else(|| {
+                format!("Filter input '{name}' does not reference an earlier result")
+            }),
         }
     }
 
@@ -433,6 +443,9 @@ impl PdfConverter {
             resource.name.clone()
         } else {
             let stream = self.capture_stream(|converter| {
+                // Filter inputs are defined in the group's absolute coordinate
+                // space, so we re-enter child traversal with the group's
+                // absolute transform instead of the caller's local transform.
                 for child in group.children() {
                     converter.process_node(child, &group.abs_transform())?;
                 }
@@ -454,11 +467,7 @@ impl PdfConverter {
             return resource.name.clone();
         }
 
-        let black = self.ensure_flood_form(
-            self.full_page_bbox(),
-            Color::new_rgb(0, 0, 0),
-            1.0,
-        );
+        let black = self.ensure_flood_form(self.full_page_bbox(), Color::new_rgb(0, 0, 0), 1.0);
         let stream = format!(
             "q /{} gs /{} Do Q",
             self.ensure_soft_mask_ext_gstate(alpha_source_form, "Alpha"),
@@ -743,10 +752,8 @@ impl PdfConverter {
         let cell_h = input_bbox.height();
         let rect_right = rect.x() + rect.width();
         let rect_bottom = rect.y() + rect.height();
-        let start_x =
-            input_bbox.x() + ((rect.x() - input_bbox.x()) / cell_w).floor() * cell_w;
-        let start_y =
-            input_bbox.y() + ((rect.y() - input_bbox.y()) / cell_h).floor() * cell_h;
+        let start_x = input_bbox.x() + ((rect.x() - input_bbox.x()) / cell_w).floor() * cell_w;
+        let start_y = input_bbox.y() + ((rect.y() - input_bbox.y()) / cell_h).floor() * cell_h;
 
         let mut stream = format!("q {} ", Self::clip_rect_ops(rect));
         let mut y = start_y;
@@ -883,9 +890,7 @@ impl PdfConverter {
                 amplitude + offset,
                 exponent
             ),
-            TransferFunction::Table(values) => {
-                Self::sampled_transfer_function_dict(values, false)
-            }
+            TransferFunction::Table(values) => Self::sampled_transfer_function_dict(values, false),
             TransferFunction::Discrete(values) => {
                 Self::sampled_transfer_function_dict(values, true)
             }

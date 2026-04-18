@@ -1,3 +1,4 @@
+/// Wrapper styles available when emitting TeX output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TexFormat {
     Standalone,

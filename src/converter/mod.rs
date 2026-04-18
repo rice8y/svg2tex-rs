@@ -1,3 +1,9 @@
+//! Core SVG traversal and PDF/TeX state management.
+//!
+//! `PdfConverter` walks the `usvg` tree, accumulates PDF drawing operators, and
+//! interns reusable PDF resources so later emitters can reference them from TeX
+//! or direct PDF output.
+
 mod filter;
 mod image;
 mod latex;
@@ -13,6 +19,7 @@ use usvg::{Group, Node, Path, Tree};
 use crate::validation::{node_requires_raster, node_unsupported_features};
 use crate::{TexEngine, TexFormat};
 
+/// Stateful SVG-to-PDF/TeX converter used for one document at a time.
 pub(crate) struct PdfConverter {
     pub(crate) size: usvg::Size,
     pub(crate) resources: PdfResources,
@@ -24,6 +31,10 @@ pub(crate) struct PdfConverter {
     pub(crate) tex_format: TexFormat,
 }
 
+/// Resource tables shared across the emitted document.
+///
+/// Each table deduplicates semantically identical resources and assigns the
+/// stable PDF object names used by the TeX backends.
 pub(crate) struct PdfResources {
     pub(crate) ext_gstates: HashMap<String, ExtGStateResource>,
     pub(crate) functions: HashMap<String, FunctionResource>,
@@ -34,6 +45,7 @@ pub(crate) struct PdfResources {
     pub(crate) next_id: usize,
 }
 
+/// Image XObject payload plus optional soft mask data.
 pub(crate) struct ImageResource {
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -44,6 +56,7 @@ pub(crate) struct ImageResource {
     pub(crate) smask: Option<SoftMaskResource>,
 }
 
+/// Raw soft-mask image stored alongside an image XObject.
 pub(crate) struct SoftMaskResource {
     pub(crate) name: String,
     pub(crate) width: u32,
@@ -53,23 +66,27 @@ pub(crate) struct SoftMaskResource {
     pub(crate) data: Vec<u8>,
 }
 
+/// Named shading resource stored for later emission.
 pub(crate) struct ShadingResource {
     pub(crate) name: String,
     pub(crate) dict: String,
 }
 
+/// Function resource used by shadings and transparency dictionaries.
 pub(crate) struct FunctionResource {
     pub(crate) name: String,
     pub(crate) pdf_dict: String,
     pub(crate) dvi_dict: String,
 }
 
+/// External graphics state resource.
 pub(crate) struct ExtGStateResource {
     pub(crate) name: String,
     pub(crate) pdf_dict: String,
     pub(crate) dvi_dict: String,
 }
 
+/// Form XObject resource.
 pub(crate) struct FormResource {
     pub(crate) name: String,
     pub(crate) pdf_dict: String,
@@ -77,6 +94,7 @@ pub(crate) struct FormResource {
     pub(crate) stream: Vec<u8>,
 }
 
+/// Tiling pattern resource.
 pub(crate) struct PatternResource {
     pub(crate) name: String,
     pub(crate) pdf_dict: String,
@@ -84,6 +102,7 @@ pub(crate) struct PatternResource {
     pub(crate) stream: Vec<u8>,
 }
 
+/// Minimal path-conversion state shared while serializing PDF operators.
 pub(crate) struct PdfContext {
     pub(crate) current_point: Option<(f32, f32)>,
     pub(crate) subpath_start: Option<(f32, f32)>,
@@ -133,6 +152,8 @@ impl PdfConverter {
         node: &Node,
         parent_transform: &usvg::Transform,
     ) -> Result<(), String> {
+        // Unsupported subtrees are rasterized in-place so the surrounding
+        // vector content can continue to use the normal traversal path.
         if node_requires_raster(node, self.embed_images) {
             let reasons = node_unsupported_features(node, self.embed_images);
             return self.rasterize_node(node, parent_transform, &reasons);
@@ -166,12 +187,19 @@ impl PdfConverter {
         let has_blend_mode = !matches!(group.blend_mode(), usvg::BlendMode::Normal);
         let has_filters = !group.filters().is_empty();
 
-        let needs_state =
-            has_transform || has_opacity || has_clip_path || has_mask || has_blend_mode || has_filters;
+        let needs_state = has_transform
+            || has_opacity
+            || has_clip_path
+            || has_mask
+            || has_blend_mode
+            || has_filters;
 
         if needs_state {
             self.pdf_ops.push_str("q ");
 
+            // Groups own the relative SVG transform. Child paths already carry
+            // absolute geometry in usvg, so we only apply transforms at group
+            // boundaries to avoid double-transforming `<use>` expansions.
             if has_transform {
                 self.apply_transform(&relative_transform);
             }
@@ -211,9 +239,8 @@ impl PdfConverter {
         _parent_transform: &usvg::Transform,
     ) -> Result<(), String> {
         self.pdf_ops.push_str("q ");
-
+        // Path coordinates are already absolute in the current group space.
         self.render_path_components(path)?;
-
         self.pdf_ops.push_str("Q ");
         Ok(())
     }
@@ -250,6 +277,9 @@ impl PdfConverter {
     }
 
     fn clip_path_uses_soft_mask(&self, clip_path: &usvg::ClipPath) -> bool {
+        // Nested clip paths inherit the most expensive requirement: once any
+        // branch needs opacity semantics we have to switch from `W n` clipping
+        // to a soft mask for the whole clip stack.
         clip_path
             .clip_path()
             .map(|nested| self.clip_path_uses_soft_mask(nested))
@@ -294,7 +324,8 @@ impl PdfConverter {
             return Ok(resource.name.clone());
         }
 
-        let stream = self.capture_stream(|converter| converter.render_clip_path_stream(clip_path))?;
+        let stream =
+            self.capture_stream(|converter| converter.render_clip_path_stream(clip_path))?;
         let pdf_resources = self.inline_pdf_resource_dict(true);
         let dvi_resources = self.inline_dvi_resource_dict(true);
         let pdf_dict = format!(
@@ -382,14 +413,13 @@ mod tests {
 
     #[test]
     fn fill_opacity_uses_extgstate() {
-        let mut converter =
-            PdfConverter::new(
-                usvg::Size::from_wh(10.0, 10.0).unwrap(),
-                false,
-                144.0,
-                TexEngine::PdfTeX,
-                TexFormat::Standalone,
-            );
+        let mut converter = PdfConverter::new(
+            usvg::Size::from_wh(10.0, 10.0).unwrap(),
+            false,
+            144.0,
+            TexEngine::PdfTeX,
+            TexFormat::Standalone,
+        );
         let color = usvg::Color::new_rgb(255, 0, 0);
         converter.apply_paint(&usvg::Paint::Color(color), 0.5, true);
 
@@ -453,14 +483,13 @@ mod tests {
 
     #[test]
     fn apply_transform_uses_pdf_matrix_order() {
-        let mut converter =
-            PdfConverter::new(
-                usvg::Size::from_wh(10.0, 10.0).unwrap(),
-                false,
-                144.0,
-                TexEngine::PdfTeX,
-                TexFormat::Standalone,
-            );
+        let mut converter = PdfConverter::new(
+            usvg::Size::from_wh(10.0, 10.0).unwrap(),
+            false,
+            144.0,
+            TexEngine::PdfTeX,
+            TexFormat::Standalone,
+        );
         let transform = usvg::Transform {
             sx: 1.0,
             kx: 2.0,
@@ -472,8 +501,14 @@ mod tests {
 
         converter.apply_transform(&transform);
 
-        assert_eq!(converter.pdf_ops, "1.000000 3.000000 2.000000 4.000000 5.000000 6.000000 cm ");
-        assert_eq!(PdfConverter::pdf_matrix(transform), "1.000000 3.000000 2.000000 4.000000 5.000000 6.000000");
+        assert_eq!(
+            converter.pdf_ops,
+            "1.000000 3.000000 2.000000 4.000000 5.000000 6.000000 cm "
+        );
+        assert_eq!(
+            PdfConverter::pdf_matrix(transform),
+            "1.000000 3.000000 2.000000 4.000000 5.000000 6.000000"
+        );
     }
 
     #[test]
@@ -481,10 +516,7 @@ mod tests {
         let parent = usvg::Transform::from_translate(150.0, 150.0);
         let child_local = usvg::Transform::from_rotate(std::f32::consts::FRAC_PI_4);
         let child_abs = parent.pre_concat(child_local);
-        let relative = parent
-            .invert()
-            .unwrap()
-            .pre_concat(child_abs);
+        let relative = parent.invert().unwrap().pre_concat(child_abs);
 
         assert!((relative.sx - child_local.sx).abs() < 1e-6);
         assert!((relative.kx - child_local.kx).abs() < 1e-6);
@@ -508,13 +540,7 @@ mod tests {
 
         let size = tree.size();
         let mut converter =
-            PdfConverter::new(
-                size,
-                false,
-                144.0,
-                TexEngine::PdfTeX,
-                TexFormat::Standalone,
-            );
+            PdfConverter::new(size, false, 144.0, TexEngine::PdfTeX, TexFormat::Standalone);
 
         converter.convert(&tree).unwrap();
         let literal = converter.generate_pdf_literal();
@@ -524,14 +550,13 @@ mod tests {
 
     #[test]
     fn luatex_page_resources_are_expanded_before_injection() {
-        let mut converter =
-            PdfConverter::new(
-                usvg::Size::from_wh(10.0, 10.0).unwrap(),
-                false,
-                144.0,
-                TexEngine::LuaTeX,
-                TexFormat::Standalone,
-            );
+        let mut converter = PdfConverter::new(
+            usvg::Size::from_wh(10.0, 10.0).unwrap(),
+            false,
+            144.0,
+            TexEngine::LuaTeX,
+            TexFormat::Standalone,
+        );
         let _ = converter.ensure_ext_gstate(&["/ca 0.500000".to_string()]);
 
         let latex = converter.generate_latex();
@@ -542,14 +567,13 @@ mod tests {
 
     #[test]
     fn pdftex_page_resources_are_expanded_before_injection() {
-        let mut converter =
-            PdfConverter::new(
-                usvg::Size::from_wh(10.0, 10.0).unwrap(),
-                false,
-                144.0,
-                TexEngine::PdfTeX,
-                TexFormat::Standalone,
-            );
+        let mut converter = PdfConverter::new(
+            usvg::Size::from_wh(10.0, 10.0).unwrap(),
+            false,
+            144.0,
+            TexEngine::PdfTeX,
+            TexFormat::Standalone,
+        );
         let _ = converter.ensure_ext_gstate(&["/ca 0.500000".to_string()]);
 
         let latex = converter.generate_latex();
@@ -560,14 +584,13 @@ mod tests {
 
     #[test]
     fn auto_engine_uses_expanded_luatex_page_resources_branch() {
-        let mut converter =
-            PdfConverter::new(
-                usvg::Size::from_wh(10.0, 10.0).unwrap(),
-                false,
-                144.0,
-                TexEngine::Auto,
-                TexFormat::Standalone,
-            );
+        let mut converter = PdfConverter::new(
+            usvg::Size::from_wh(10.0, 10.0).unwrap(),
+            false,
+            144.0,
+            TexEngine::Auto,
+            TexFormat::Standalone,
+        );
         let _ = converter.ensure_ext_gstate(&["/ca 0.500000".to_string()]);
 
         let latex = converter.generate_latex();

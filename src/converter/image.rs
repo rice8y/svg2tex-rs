@@ -32,11 +32,15 @@ impl PdfConverter {
                     img_name, image_resource.width, image_resource.height
                 );
 
-                self.resources.images.insert(img_name.clone(), image_resource);
+                self.resources
+                    .images
+                    .insert(img_name.clone(), image_resource);
 
                 let rect = img.bounding_box();
                 self.pdf_ops.push_str("q ");
 
+                // usvg stores image content in object-local coordinates, so we
+                // emit the node transform first and then scale into its box.
                 if !super::util::is_identity_transform(&relative_transform) {
                     self.apply_transform(&relative_transform);
                 }
@@ -64,6 +68,8 @@ impl PdfConverter {
         self.append_rect_path(0.0, 0.0, tree.size().width(), tree.size().height());
         self.pdf_ops.push_str("W n ");
 
+        // Embedded SVG images start a fresh subtree, so children are evaluated
+        // relative to the image's own root instead of the outer document.
         for child in tree.root().children() {
             let _ = self.process_node(child, &usvg::Transform::identity());
         }
@@ -92,11 +98,7 @@ impl PdfConverter {
         })?;
 
         let rgba = decoded.to_rgba8();
-        Some(self.image_resource_from_rgba(
-            rgba.width(),
-            rgba.height(),
-            rgba.as_raw(),
-        ))
+        Some(self.image_resource_from_rgba(rgba.width(), rgba.height(), rgba.as_raw()))
     }
 
     pub(crate) fn image_resource_from_rgba(
@@ -125,8 +127,8 @@ impl PdfConverter {
 
         let smask = if has_alpha {
             let smask_name = format!("SMask{}", self.resources.get_next_id());
-            let smask_data =
-                Self::deflate_bytes(&alpha).expect("compressing image alpha channel should succeed");
+            let smask_data = Self::deflate_bytes(&alpha)
+                .expect("compressing image alpha channel should succeed");
             Some(SoftMaskResource {
                 name: smask_name,
                 width,
