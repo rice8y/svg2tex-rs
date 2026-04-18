@@ -14,7 +14,7 @@ impl PdfConverter {
         let relative_transform = parent_transform
             .invert()
             .unwrap_or(usvg::Transform::identity())
-            .post_concat(abs_transform);
+            .pre_concat(abs_transform);
 
         match img.kind() {
             usvg::ImageKind::SVG(tree) => {

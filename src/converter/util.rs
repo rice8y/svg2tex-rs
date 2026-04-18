@@ -17,6 +17,6 @@ impl PdfConverter {
     }
 
     pub(crate) fn tex_obj_ref(name: &str) -> String {
-        format!("{} 0 R", Self::tex_obj_macro(name))
+        format!("{}\\space 0 R", Self::tex_obj_macro(name))
     }
 }
