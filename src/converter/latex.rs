@@ -2,6 +2,8 @@ use super::{ImageResource, PdfConverter};
 use crate::{TexEngine, TexFormat};
 
 impl PdfConverter {
+    /// Builds a TeX wrapper that recreates the collected PDF resources and
+    /// literal operators for the selected engine.
     pub(crate) fn generate_latex(&self) -> String {
         let mut output = String::new();
 
@@ -43,7 +45,9 @@ impl PdfConverter {
                 output.push_str("\\makeatletter\n");
                 output.push_str("\\newif\\ifsvgpdfmode\n");
                 output.push_str("\\@ifundefined{pdfoutput}{\\svgpdfmodefalse}{%\n");
-                output.push_str("  \\ifnum\\pdfoutput>0 \\svgpdfmodetrue\\else\\svgpdfmodefalse\\fi\n");
+                output.push_str(
+                    "  \\ifnum\\pdfoutput>0 \\svgpdfmodetrue\\else\\svgpdfmodefalse\\fi\n",
+                );
                 output.push_str("}\n");
                 output.push_str("\\makeatother\n");
                 output.push('\n');
@@ -91,6 +95,9 @@ impl PdfConverter {
                     output.push_str("\\ifsvgpdfmode\n");
                     output.push_str("  \\ifpdftex\n");
                     if !pdf_page_resources.is_empty() {
+                        // `\\expanded` forces TeX object-number macros to be
+                        // resolved before the engine copies the dictionary into
+                        // the page resource table.
                         output.push_str("    \\pdfpageresources\\expanded{{\n");
                         output.push_str(&pdf_page_resources);
                         output.push_str("    }}\n");
@@ -165,10 +172,7 @@ impl PdfConverter {
                 output.push_str("      \\fi\n");
             }
             TexEngine::PdfTeX => {
-                output.push_str(&format!(
-                    "      \\pdfliteral direct{{{}}}%\n",
-                    self.pdf_ops
-                ));
+                output.push_str(&format!("      \\pdfliteral direct{{{}}}%\n", self.pdf_ops));
             }
             TexEngine::LuaTeX => {
                 output.push_str(&format!(
@@ -478,7 +482,9 @@ impl PdfConverter {
         let ext_gstates = self
             .sorted_ext_gstates()
             .into_iter()
-            .map(|(_, resource)| format!("/{} {}", resource.name, Self::tex_obj_ref(&resource.name)))
+            .map(|(_, resource)| {
+                format!("/{} {}", resource.name, Self::tex_obj_ref(&resource.name))
+            })
             .collect::<Vec<_>>();
         if !ext_gstates.is_empty() {
             sections.push(format!("  /ExtGState<<{}>>\n", ext_gstates.join(" ")));
