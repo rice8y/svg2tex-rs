@@ -155,11 +155,8 @@ impl PdfConverter {
         group: &Group,
         parent_transform: &usvg::Transform,
     ) -> Result<(), String> {
-        let abs_transform = group.abs_transform();
-        let relative_transform = parent_transform
-            .invert()
-            .unwrap_or(usvg::Transform::identity())
-            .post_concat(abs_transform);
+        let relative_transform = group.transform();
+        let current_transform = parent_transform.pre_concat(relative_transform);
 
         let has_transform = !self::util::is_identity_transform(&relative_transform);
         let opacity = group.opacity().get();
@@ -197,7 +194,7 @@ impl PdfConverter {
             self.process_filter_group(group_node, group, &relative_transform)?;
         } else {
             for child in group.children() {
-                self.process_node(child, &abs_transform)?;
+                self.process_node(child, &current_transform)?;
             }
         }
 
@@ -211,19 +208,9 @@ impl PdfConverter {
     fn process_path(
         &mut self,
         path: &Path,
-        parent_transform: &usvg::Transform,
+        _parent_transform: &usvg::Transform,
     ) -> Result<(), String> {
-        let abs_transform = path.abs_transform();
-        let relative_transform = parent_transform
-            .invert()
-            .unwrap_or(usvg::Transform::identity())
-            .post_concat(abs_transform);
-
         self.pdf_ops.push_str("q ");
-
-        if !self::util::is_identity_transform(&relative_transform) {
-            self.apply_transform(&relative_transform);
-        }
 
         self.render_path_components(path)?;
 
@@ -387,6 +374,11 @@ impl PdfConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use usvg::{Options, Tree};
+
+    fn parse(svg: &str) -> Tree {
+        Tree::from_data(svg.as_bytes(), &Options::default()).unwrap()
+    }
 
     #[test]
     fn fill_opacity_uses_extgstate() {
@@ -455,8 +447,8 @@ mod tests {
 
         let resources = converter.build_pdf_page_resources();
         assert_eq!(resources.matches("/XObject<<").count(), 1);
-        assert!(resources.contains("/Img2 \\csname svgobj@Img2\\endcsname 0 R"));
-        assert!(resources.contains("/Img3 \\csname svgobj@Img3\\endcsname 0 R"));
+        assert!(resources.contains("/Img2 \\csname svgobj@Img2\\endcsname\\space 0 R"));
+        assert!(resources.contains("/Img3 \\csname svgobj@Img3\\endcsname\\space 0 R"));
     }
 
     #[test]
@@ -482,5 +474,106 @@ mod tests {
 
         assert_eq!(converter.pdf_ops, "1.000000 3.000000 2.000000 4.000000 5.000000 6.000000 cm ");
         assert_eq!(PdfConverter::pdf_matrix(transform), "1.000000 3.000000 2.000000 4.000000 5.000000 6.000000");
+    }
+
+    #[test]
+    fn child_transform_is_computed_relative_to_parent_transform() {
+        let parent = usvg::Transform::from_translate(150.0, 150.0);
+        let child_local = usvg::Transform::from_rotate(std::f32::consts::FRAC_PI_4);
+        let child_abs = parent.pre_concat(child_local);
+        let relative = parent
+            .invert()
+            .unwrap()
+            .pre_concat(child_abs);
+
+        assert!((relative.sx - child_local.sx).abs() < 1e-6);
+        assert!((relative.kx - child_local.kx).abs() < 1e-6);
+        assert!((relative.ky - child_local.ky).abs() < 1e-6);
+        assert!((relative.sy - child_local.sy).abs() < 1e-6);
+        assert!(relative.tx.abs() < 1e-6);
+        assert!(relative.ty.abs() < 1e-6);
+    }
+
+    #[test]
+    fn nested_use_groups_keep_diagonal_rotation() {
+        let tree = parse(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 300 300">
+  <g id="star" transform="translate(150 150)">
+    <path id="bar" fill="#f90" d="M-84.1487,-15.8513 a22.4171,22.4171 0 1 0 0,31.7026 h168.2974 a22.4171,22.4171 0 1 0 0,-31.7026 Z"/>
+    <use xlink:href="#bar" transform="rotate(45)"/>
+  </g>
+  <use xlink:href="#star"/>
+</svg>"##,
+        );
+
+        let size = tree.size();
+        let mut converter =
+            PdfConverter::new(
+                size,
+                false,
+                144.0,
+                TexEngine::PdfTeX,
+                TexFormat::Standalone,
+            );
+
+        converter.convert(&tree).unwrap();
+        let literal = converter.generate_pdf_literal();
+
+        assert!(literal.contains("0.707107 0.707107 -0.707107 0.707107"));
+    }
+
+    #[test]
+    fn luatex_page_resources_are_expanded_before_injection() {
+        let mut converter =
+            PdfConverter::new(
+                usvg::Size::from_wh(10.0, 10.0).unwrap(),
+                false,
+                144.0,
+                TexEngine::LuaTeX,
+                TexFormat::Standalone,
+            );
+        let _ = converter.ensure_ext_gstate(&["/ca 0.500000".to_string()]);
+
+        let latex = converter.generate_latex();
+
+        assert!(latex.contains("\\pdfvariable pageresources\\expanded{{"));
+        assert!(!latex.contains("\\pdfvariable pageresources{\n"));
+    }
+
+    #[test]
+    fn pdftex_page_resources_are_expanded_before_injection() {
+        let mut converter =
+            PdfConverter::new(
+                usvg::Size::from_wh(10.0, 10.0).unwrap(),
+                false,
+                144.0,
+                TexEngine::PdfTeX,
+                TexFormat::Standalone,
+            );
+        let _ = converter.ensure_ext_gstate(&["/ca 0.500000".to_string()]);
+
+        let latex = converter.generate_latex();
+
+        assert!(latex.contains("\\pdfpageresources\\expanded{{"));
+        assert!(!latex.contains("\\pdfpageresources{\n"));
+    }
+
+    #[test]
+    fn auto_engine_uses_expanded_luatex_page_resources_branch() {
+        let mut converter =
+            PdfConverter::new(
+                usvg::Size::from_wh(10.0, 10.0).unwrap(),
+                false,
+                144.0,
+                TexEngine::Auto,
+                TexFormat::Standalone,
+            );
+        let _ = converter.ensure_ext_gstate(&["/ca 0.500000".to_string()]);
+
+        let latex = converter.generate_latex();
+
+        assert!(latex.contains("  \\else\\ifluatex\n"));
+        assert!(latex.contains("    \\pdfpageresources\\expanded{{\n"));
+        assert!(latex.contains("    \\pdfvariable pageresources\\expanded{{\n"));
     }
 }
