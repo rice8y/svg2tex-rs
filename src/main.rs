@@ -1,3 +1,5 @@
+//! Command-line entry point for the `svg2tex-rs` binary.
+
 use clap::Parser;
 
 use svg2tex_rs::{run, Args};
