@@ -22,10 +22,10 @@ name = "svg2tex"
 path = "src/main.rs"
 
 [dependencies]
-usvg = "0.45"
-resvg = "0.45"
-tiny-skia = "0.11"
-clap = { version = "4.5", features = ["derive"] }
+usvg = "0.47"
+resvg = "0.47"
+tiny-skia = "0.12"
+clap = { version = "4.6", features = ["derive"] }
 flate2 = "1.1"
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
-roxmltree = "0.20"
+roxmltree = "0.21"
