@@ -1,3 +1,4 @@
+/// TeX backends supported by the generated output wrapper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TexEngine {
     Auto,
