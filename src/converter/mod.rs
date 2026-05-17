@@ -583,6 +583,68 @@ mod tests {
     }
 
     #[test]
+    fn pdf_stream_attrs_use_entries_not_nested_dictionaries() {
+        let mut converter = PdfConverter::new(
+            usvg::Size::from_wh(10.0, 10.0).unwrap(),
+            false,
+            144.0,
+            TexEngine::LuaTeX,
+            TexFormat::Standalone,
+        );
+        converter.resources.images.insert(
+            "Img1".to_string(),
+            ImageResource {
+                width: 1,
+                height: 1,
+                color_space: "DeviceRGB".to_string(),
+                bits_per_component: 8,
+                filter: "FlateDecode".to_string(),
+                data: vec![
+                    0x78, 0x9C, 0x63, 0x60, 0x60, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01,
+                ],
+                smask: None,
+            },
+        );
+
+        let latex = converter.generate_latex();
+
+        assert!(latex.contains("\\pdfvariable compresslevel=0"));
+        assert!(latex.contains("stream attr{/Type/XObject/Subtype/Image"));
+        assert!(!latex.contains("stream attr{<</Type/XObject"));
+    }
+
+    #[test]
+    fn pdftex_resource_streams_disable_automatic_compression() {
+        let mut converter = PdfConverter::new(
+            usvg::Size::from_wh(10.0, 10.0).unwrap(),
+            false,
+            144.0,
+            TexEngine::PdfTeX,
+            TexFormat::Standalone,
+        );
+        converter.resources.images.insert(
+            "Img1".to_string(),
+            ImageResource {
+                width: 1,
+                height: 1,
+                color_space: "DeviceRGB".to_string(),
+                bits_per_component: 8,
+                filter: "FlateDecode".to_string(),
+                data: vec![
+                    0x78, 0x9C, 0x63, 0x60, 0x60, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01,
+                ],
+                smask: None,
+            },
+        );
+
+        let latex = converter.generate_latex();
+
+        assert!(latex.contains("\\pdfcompresslevel=0"));
+        assert!(latex.contains("stream attr{/Type/XObject/Subtype/Image"));
+        assert!(!latex.contains("stream attr{<</Type/XObject"));
+    }
+
+    #[test]
     fn auto_engine_uses_expanded_luatex_page_resources_branch() {
         let mut converter = PdfConverter::new(
             usvg::Size::from_wh(10.0, 10.0).unwrap(),

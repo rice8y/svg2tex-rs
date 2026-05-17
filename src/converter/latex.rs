@@ -291,7 +291,7 @@ impl PdfConverter {
             output.push_str(&format!(
                 "\\immediate\\pdfobj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
                 Self::tex_obj_macro(&form.name),
-                form.pdf_dict,
+                Self::pdf_stream_attr_entries(&form.pdf_dict),
                 Self::ascii_hex_stream(&form.stream)
             ));
         }
@@ -300,7 +300,7 @@ impl PdfConverter {
             output.push_str(&format!(
                 "\\immediate\\pdfobj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
                 Self::tex_obj_macro(&pattern.name),
-                pattern.pdf_dict,
+                Self::pdf_stream_attr_entries(&pattern.pdf_dict),
                 Self::ascii_hex_stream(&pattern.stream)
             ));
         }
@@ -317,7 +317,7 @@ impl PdfConverter {
             output.push_str(&self.generate_pdftex_image_object(img_name, resource));
         }
 
-        output
+        Self::with_pdftex_uncompressed_streams(output)
     }
 
     fn generate_lua_resource_defs(&self) -> String {
@@ -398,7 +398,7 @@ impl PdfConverter {
             output.push_str(&format!(
                 "\\immediate\\pdfextension obj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
                 Self::tex_obj_macro(&form.name),
-                form.pdf_dict,
+                Self::pdf_stream_attr_entries(&form.pdf_dict),
                 Self::ascii_hex_stream(&form.stream)
             ));
         }
@@ -407,7 +407,7 @@ impl PdfConverter {
             output.push_str(&format!(
                 "\\immediate\\pdfextension obj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
                 Self::tex_obj_macro(&pattern.name),
-                pattern.pdf_dict,
+                Self::pdf_stream_attr_entries(&pattern.pdf_dict),
                 Self::ascii_hex_stream(&pattern.stream)
             ));
         }
@@ -424,7 +424,7 @@ impl PdfConverter {
             output.push_str(&self.generate_lua_image_object(img_name, resource));
         }
 
-        output
+        Self::with_luatex_uncompressed_streams(output)
     }
 
     fn generate_dvi_resource_defs(&self) -> String {
@@ -588,7 +588,7 @@ impl PdfConverter {
             output.push_str(&format!(
                 "\\immediate\\pdfobj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
                 Self::tex_obj_macro(&smask.name),
-                self.tex_image_dict_for_pdftex_smask(smask),
+                Self::pdf_stream_attr_entries(&self.tex_image_dict_for_pdftex_smask(smask)),
                 Self::ascii_hex_stream(&smask.data)
             ));
         }
@@ -596,7 +596,7 @@ impl PdfConverter {
         output.push_str(&format!(
             "\\immediate\\pdfobj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
             Self::tex_obj_macro(img_name),
-            self.tex_image_dict_for_pdftex(img_name, resource),
+            Self::pdf_stream_attr_entries(&self.tex_image_dict_for_pdftex(img_name, resource)),
             Self::ascii_hex_stream(&resource.data)
         ));
 
@@ -610,7 +610,7 @@ impl PdfConverter {
             output.push_str(&format!(
                 "\\immediate\\pdfextension obj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
                 Self::tex_obj_macro(&smask.name),
-                self.tex_image_dict_for_lua_smask(smask),
+                Self::pdf_stream_attr_entries(&self.tex_image_dict_for_lua_smask(smask)),
                 Self::ascii_hex_stream(&smask.data)
             ));
         }
@@ -618,7 +618,7 @@ impl PdfConverter {
         output.push_str(&format!(
             "\\immediate\\pdfextension obj useobjnum {} stream attr{{{}}}{{{}}}\\relax\n",
             Self::tex_obj_macro(img_name),
-            self.tex_image_dict_for_lua(img_name, resource),
+            Self::pdf_stream_attr_entries(&self.tex_image_dict_for_lua(img_name, resource)),
             Self::ascii_hex_stream(&resource.data)
         ));
 
@@ -645,5 +645,42 @@ impl PdfConverter {
         ));
 
         output
+    }
+
+    fn pdf_stream_attr_entries(dict: &str) -> &str {
+        dict.trim()
+            .strip_prefix("<<")
+            .and_then(|value| value.strip_suffix(">>"))
+            .unwrap_or(dict)
+    }
+
+    fn with_pdftex_uncompressed_streams(output: String) -> String {
+        if output.is_empty() {
+            return output;
+        }
+
+        format!(
+            "\\ifdefined\\svgpdfsavedcompresslevel\\else\\newcount\\svgpdfsavedcompresslevel\\fi\n\
+\\svgpdfsavedcompresslevel=\\pdfcompresslevel\n\
+\\pdfcompresslevel=0\n\
+{}\
+\\pdfcompresslevel=\\svgpdfsavedcompresslevel\n",
+            output
+        )
+    }
+
+    fn with_luatex_uncompressed_streams(output: String) -> String {
+        if output.is_empty() {
+            return output;
+        }
+
+        format!(
+            "\\ifdefined\\svgluapdfsavedcompresslevel\\else\\newcount\\svgluapdfsavedcompresslevel\\fi\n\
+\\svgluapdfsavedcompresslevel=\\numexpr\\pdfvariable compresslevel\\relax\n\
+\\pdfvariable compresslevel=0\n\
+{}\
+\\pdfvariable compresslevel=\\svgluapdfsavedcompresslevel\n",
+            output
+        )
     }
 }
