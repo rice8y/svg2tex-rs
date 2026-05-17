@@ -1,3 +1,9 @@
+## 0.1.2
+
+### Fixed
+
+- Emit valid embedded image streams in TeX output by preserving stream filters for pdfTeX and LuaTeX ([#6](https://github.com/rice8y/svg2tex-rs/issues/6))
+
 ## 0.1.1
 
 ### Added
