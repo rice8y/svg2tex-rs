@@ -1,3 +1,9 @@
+## 0.1.3
+
+### Fixed
+
+- Preserve embedded image rendering in `platex`/`uplatex` + `dvipdfmx` output by tiling DVI image streams and placing them with pixel-aligned Form XObjects ([#10](https://github.com/rice8y/svg2tex-rs/issues/10))
+
 ## 0.1.2
 
 ### Fixed
