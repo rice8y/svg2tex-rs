@@ -136,6 +136,7 @@ impl PdfConverter {
                 bits_per_component: 8,
                 filter: "FlateDecode".to_string(),
                 data: smask_data,
+                raw_alpha: alpha,
             })
         } else {
             None
@@ -148,6 +149,7 @@ impl PdfConverter {
             bits_per_component: 8,
             filter: "FlateDecode".to_string(),
             data,
+            raw_rgb: rgb,
             smask,
         }
     }
@@ -212,31 +214,6 @@ impl PdfConverter {
     pub(crate) fn tex_image_dict_for_lua_smask(&self, smask: &SoftMaskResource) -> String {
         format!(
             "<</Type/XObject/Subtype/Image/Width {}/Height {}/ColorSpace/DeviceGray/BitsPerComponent {}/Filter[/ASCIIHexDecode /{}]>>",
-            smask.width, smask.height, smask.bits_per_component, smask.filter
-        )
-    }
-
-    pub(crate) fn dvi_image_dict(&self, _img_name: &str, resource: &ImageResource) -> String {
-        let mut dict = format!(
-            "<</Type/XObject/Subtype/Image/Width {}/Height {}/ColorSpace/{}/BitsPerComponent {}/Filter/{}",
-            resource.width,
-            resource.height,
-            resource.color_space,
-            resource.bits_per_component,
-            resource.filter
-        );
-
-        if let Some(smask) = &resource.smask {
-            dict.push_str(&format!("/SMask @{}", smask.name));
-        }
-
-        dict.push_str(">>");
-        dict
-    }
-
-    pub(crate) fn dvi_image_dict_for_smask(&self, smask: &SoftMaskResource) -> String {
-        format!(
-            "<</Type/XObject/Subtype/Image/Width {}/Height {}/ColorSpace/DeviceGray/BitsPerComponent {}/Filter/{}>>",
             smask.width, smask.height, smask.bits_per_component, smask.filter
         )
     }
