@@ -53,6 +53,7 @@ pub(crate) struct ImageResource {
     pub(crate) bits_per_component: u8,
     pub(crate) filter: String,
     pub(crate) data: Vec<u8>,
+    pub(crate) raw_rgb: Vec<u8>,
     pub(crate) smask: Option<SoftMaskResource>,
 }
 
@@ -64,6 +65,7 @@ pub(crate) struct SoftMaskResource {
     pub(crate) bits_per_component: u8,
     pub(crate) filter: String,
     pub(crate) data: Vec<u8>,
+    pub(crate) raw_alpha: Vec<u8>,
 }
 
 /// Named shading resource stored for later emission.
@@ -448,6 +450,7 @@ mod tests {
                 bits_per_component: 8,
                 filter: "FlateDecode".to_string(),
                 data: vec![0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01],
+                raw_rgb: vec![0, 0, 0],
                 smask: None,
             },
         );
@@ -460,6 +463,7 @@ mod tests {
                 bits_per_component: 8,
                 filter: "FlateDecode".to_string(),
                 data: vec![0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01],
+                raw_rgb: vec![0, 0, 0],
                 smask: None,
             },
         );
@@ -602,6 +606,7 @@ mod tests {
                 data: vec![
                     0x78, 0x9C, 0x63, 0x60, 0x60, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01,
                 ],
+                raw_rgb: vec![0, 0, 0],
                 smask: None,
             },
         );
@@ -633,6 +638,7 @@ mod tests {
                 data: vec![
                     0x78, 0x9C, 0x63, 0x60, 0x60, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01,
                 ],
+                raw_rgb: vec![0, 0, 0],
                 smask: None,
             },
         );

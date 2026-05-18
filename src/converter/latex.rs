@@ -1,6 +1,8 @@
 use super::{ImageResource, PdfConverter};
 use crate::{TexEngine, TexFormat};
 
+const DVI_IMAGE_TILE_BYTES: usize = 30_000;
+
 impl PdfConverter {
     /// Builds a TeX wrapper that recreates the collected PDF resources and
     /// literal operators for the selected engine.
@@ -160,13 +162,13 @@ impl PdfConverter {
                 ));
                 output.push_str("        \\else\n");
                 output.push_str(&format!(
-                    "          \\special{{pdf:literal direct {}}}%\n",
+                    "          \\special{{pdf:content {}}}%\n",
                     self.pdf_ops
                 ));
                 output.push_str("        \\fi\\fi\n");
                 output.push_str("      \\else\n");
                 output.push_str(&format!(
-                    "        \\special{{pdf:literal direct {}}}%\n",
+                    "        \\special{{pdf:content {}}}%\n",
                     self.pdf_ops
                 ));
                 output.push_str("      \\fi\n");
@@ -182,7 +184,7 @@ impl PdfConverter {
             }
             TexEngine::XeTeX | TexEngine::PTeX | TexEngine::UpTeX => {
                 output.push_str(&format!(
-                    "      \\special{{pdf:literal direct {}}}%\n",
+                    "      \\special{{pdf:content {}}}%\n",
                     self.pdf_ops
                 ));
             }
@@ -627,21 +629,93 @@ impl PdfConverter {
 
     fn generate_dvi_image_object(&self, img_name: &str, resource: &ImageResource) -> String {
         let mut output = String::new();
+        let bytes_per_pixel = 3;
+        let width = resource.width as usize;
+        let height = resource.height as usize;
+        let tile_width = (DVI_IMAGE_TILE_BYTES / bytes_per_pixel).max(1).min(width);
+        let tile_row_bytes = tile_width * bytes_per_pixel;
+        let rows_per_tile = (DVI_IMAGE_TILE_BYTES / tile_row_bytes).max(1);
+        let mut form_ops = String::new();
+        let mut form_xobjects = Vec::new();
+        let mut tile_index = 0;
 
-        if let Some(smask) = &resource.smask {
-            output.push_str(&format!(
-                "\\special{{pdf:stream @{} <{}> {}}}\n",
-                smask.name,
-                Self::hex_stream(&smask.data),
-                self.dvi_image_dict_for_smask(smask)
-            ));
+        for row_start in (0..height).step_by(rows_per_tile) {
+            let row_end = (row_start + rows_per_tile).min(height);
+            let tile_height = row_end - row_start;
+
+            for col_start in (0..width).step_by(tile_width) {
+                let col_end = (col_start + tile_width).min(width);
+                let tile_width = col_end - col_start;
+                let tile_name = format!("{}T{}", img_name, tile_index);
+                let smask_name = resource
+                    .smask
+                    .as_ref()
+                    .map(|_| format!("{}SM{}", img_name, tile_index));
+
+                if let (Some(smask), Some(smask_name)) = (&resource.smask, &smask_name) {
+                    let mut alpha_tile = Vec::with_capacity(tile_width * tile_height);
+                    for row in row_start..row_end {
+                        let alpha_start = row * width + col_start;
+                        let alpha_end = row * width + col_end;
+                        alpha_tile.extend_from_slice(&smask.raw_alpha[alpha_start..alpha_end]);
+                    }
+                    output.push_str(&format!(
+                        "\\special{{pdf:stream @{} <{}> <</Type/XObject/Subtype/Image/Width {}/Height {}/ColorSpace/DeviceGray/BitsPerComponent {}>>}}\n",
+                        smask_name,
+                        Self::hex_stream(&alpha_tile),
+                        tile_width,
+                        tile_height,
+                        smask.bits_per_component
+                    ));
+                }
+
+                let mut rgb_tile = Vec::with_capacity(tile_width * tile_height * bytes_per_pixel);
+                for row in row_start..row_end {
+                    let byte_start = (row * width + col_start) * bytes_per_pixel;
+                    let byte_end = (row * width + col_end) * bytes_per_pixel;
+                    rgb_tile.extend_from_slice(&resource.raw_rgb[byte_start..byte_end]);
+                }
+                let mut tile_dict = format!(
+                    "<</Type/XObject/Subtype/Image/Width {}/Height {}/ColorSpace/{}/BitsPerComponent {}",
+                    tile_width, tile_height, resource.color_space, resource.bits_per_component
+                );
+                if let Some(smask_name) = &smask_name {
+                    tile_dict.push_str(&format!("/SMask @{}", smask_name));
+                }
+                tile_dict.push_str(">>");
+
+                output.push_str(&format!(
+                    "\\special{{pdf:stream @{} <{}> {}}}\n",
+                    tile_name,
+                    Self::hex_stream(&rgb_tile),
+                    tile_dict
+                ));
+
+                let tile_y = height - row_end;
+                form_ops.push_str(&format!(
+                    "q {} 0 0 {} {} {} cm /{} Do Q ",
+                    tile_width, tile_height, col_start, tile_y, tile_name
+                ));
+                form_xobjects.push(format!("/{} @{}", tile_name, tile_name));
+                tile_index += 1;
+            }
         }
 
+        let form_matrix_x = 1.0 / resource.width as f64;
+        let form_matrix_y = 1.0 / resource.height as f64;
+        let form_dict = format!(
+            "<</Type/XObject/Subtype/Form/BBox [0 0 {} {}] /Matrix [{:.12} 0 0 {:.12} 0 0] /Resources <</XObject<<{}>>>>>>",
+            resource.width,
+            resource.height,
+            form_matrix_x,
+            form_matrix_y,
+            form_xobjects.join(" ")
+        );
         output.push_str(&format!(
             "\\special{{pdf:stream @{} <{}> {}}}\n",
             img_name,
-            Self::hex_stream(&resource.data),
-            self.dvi_image_dict(img_name, resource)
+            Self::hex_stream(form_ops.as_bytes()),
+            form_dict
         ));
 
         output
